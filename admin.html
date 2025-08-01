@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rapid Repo - Admin Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.9.3/html2pdf.bundle.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+      padding: 2rem;
+      color: #333;
+    }
+
+    header {
+      font-size: 1.8rem;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .dashboard {
+      max-width: 960px;
+      margin: auto;
+      background: rgba(255, 255, 255, 0.85);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.05);
+      border-radius: 16px;
+      padding: 2rem;
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .filters {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.5rem;
+    }
+
+    input, select, textarea {
+      padding: 0.75rem;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+      min-width: 200px;
+      flex: 1;
+    }
+
+    .report {
+      background: white;
+      padding: 1rem;
+      border-radius: 12px;
+      border: 1px solid #ddd;
+      margin-bottom: 1rem;
+    }
+
+    .report h3 {
+      margin-top: 0;
+    }
+
+    .report-actions {
+      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .report-actions button {
+      background: #333;
+      color: white;
+      border: none;
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .report-actions button:hover {
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+  <header>Rapid Repo</header>
+
+  <div class="dashboard">
+    <h2>Admin Dashboard</h2>
+    <div class="filters">
+      <select id="statusFilter">
+        <option value="">All</option>
+        <option value="Pending">Pending</option>
+        <option value="Completed">Completed</option>
+      </select>
+      <input type="text" id="plateSearch" placeholder="Search by plate..." />
+    </div>
+    <div id="reportsContainer">Loading reports...</div>
+  </div>
+
+  <script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
+  import {
+    getFirestore, collection, query, onSnapshot, updateDoc, doc
+  } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+  import {
+    getAuth, onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAaeCLZ98isu0tMlPCGcFH2kDUzPinMSVw",
+    authDomain: "rapid-repo.firebaseapp.com",
+    databaseURL: "https://rapid-repo-default-rtdb.firebaseio.com",
+    projectId: "rapid-repo",
+    storageBucket: "rapid-repo.appspot.com",
+    messagingSenderId: "731599470074",
+    appId: "1:731599470074:web:8f2d575214398df7473843"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth();
+
+  const container = document.getElementById("reportsContainer");
+
+  let allReports = [];
+
+  onAuthStateChanged(auth, (user) => {
+    if (!user) {
+      // No user session
+      window.location.href = "/login.html";
+      return;
+    }
+
+    // User is logged in
+    const uid = user.uid;
+    const userRef = doc(db, "users", uid);
+
+    getDoc(userRef).then((snap) => {
+      const data = snap.data();
+      if (!data || data.role !== "admin") {
+        window.location.href = "/login.html"; // Not an admin
+      } else {
+        // Load dashboard
+        loadReports();
+      }
+    });
+  });
+
+  import { getDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+
+  function loadReports() {
+    const statusFilter = document.getElementById("statusFilter");
+    const plateSearch = document.getElementById("plateSearch");
+
+    onSnapshot(query(collection(db, "reports")), (snapshot) => {
+      allReports = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      renderReports();
+    });
+
+    statusFilter.addEventListener("change", renderReports);
+    plateSearch.addEventListener("input", renderReports);
+  }
+
+  function renderReports() {
+    const statusFilter = document.getElementById("statusFilter").value;
+    const plateSearch = document.getElementById("plateSearch").value.toLowerCase();
+
+    const filtered = allReports.filter(r => {
+      return (!statusFilter || r.status === statusFilter) &&
+        (!plateSearch || r.plate.toLowerCase().includes(plateSearch));
+    });
+
+    if (filtered.length === 0) {
+      container.innerHTML = '<p>No matching reports found.</p>';
+      return;
+    }
+
+    container.innerHTML = filtered.map(r => `
+      <div class="report" id="report-${r.id}">
+        <h3>${r.plate} (${r.state})</h3>
+        <p><strong>Make/Model:</strong> ${r.make} ${r.model}</p>
+        <p><strong>Color:</strong> ${r.color}</p>
+        <p><strong>Status:</strong> ${r.status}</p>
+        <textarea id="notes-${r.id}" placeholder="Add internal notes...">${r.notes || ''}</textarea>
+        <div class="report-actions">
+          <button class="complete" onclick="markComplete('${r.id}')">Mark Completed</button>
+          <button class="email" onclick="emailPolice('${r.id}')">Email Police</button>
+          <button class="pdf" onclick="exportPDF('${r.id}')">Export PDF</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  window.markComplete = async (id) => {
+    const ref = doc(db, "reports", id);
+    const notes = document.getElementById(`notes-${id}`).value;
+    await updateDoc(ref, { status: "Completed", notes });
+  };
+
+  window.emailPolice = async (id) => {
+    const report = allReports.find(r => r.id === id);
+    const emailBody = `Plate: ${report.plate}\nMake: ${report.make}\nModel: ${report.model}\nState: ${report.state}\nColor: ${report.color}`;
+
+    fetch("https://us-central1-rapid-repo.cloudfunctions.net/sendPoliceEmail", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reportId: id, message: emailBody })
+    })
+    .then(res => res.ok ? alert("Police notified!") : alert("Error sending email."))
+    .catch(() => alert("Error connecting to server."));
+  };
+
+  window.exportPDF = (id) => {
+    const reportDiv = document.getElementById(`report-${id}`);
+    html2pdf().from(reportDiv).save(`report-${id}.pdf`);
+  };
+</script>

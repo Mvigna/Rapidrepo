@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rapid Repo - Agent Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+      padding: 2rem;
+      color: #333;
+    }
+
+    header {
+      font-size: 1.8rem;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: auto;
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.05);
+      border-radius: 16px;
+      padding: 2rem;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      margin-bottom: 1rem;
+      padding: 0.75rem;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+    }
+
+    button {
+      background: #333;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #000;
+    }
+
+    .report {
+      background: white;
+      padding: 1rem;
+      border-radius: 10px;
+      margin-top: 1rem;
+      border: 1px solid #ddd;
+      cursor: pointer;
+    }
+
+    .report:hover {
+      background: #f0f0f0;
+    }
+
+    @keyframes fadeIn { from {opacity: 0;} to {opacity: 1;} }
+    @keyframes popIn { from {transform: scale(0.95); opacity: 0;} to {transform: scale(1); opacity: 1;} }
+  </style>
+</head>
+<body>
+  <header>Rapid Repo</header>
+
+  <div class="container">
+    <h2>Submit New Report</h2>
+    <form id="reportForm">
+      <input type="text" id="plate" name="plate" placeholder="License Plate" required />
+      <input type="text" id="state" name="state" placeholder="Plate State (e.g., PA)" required />
+      <input type="text" id="make" name="make" placeholder="Vehicle Make" required />
+      <input type="text" id="model" name="model" placeholder="Vehicle Model" required />
+      <input type="text" id="color" name="color" placeholder="Vehicle Color" required />
+      <input type="file" id="photo" accept="image/*" />
+      <button type="submit">Submit Report</button>
+    </form>
+
+    <h2 style="margin-top: 2rem;">My Reports</h2>
+    <div id="myReports">Loading...</div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" onclick="handleBackdropClick(event)" style="
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.6);
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    animation: fadeIn 0.3s ease-in-out;
+  ">
+    <div id="modalContent" style="
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      position: relative;
+      animation: popIn 0.3s ease-in-out;
+    " onclick="event.stopPropagation()">
+      <button onclick="closeModal()" style="
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: transparent;
+        border: none;
+        font-size: 1.2rem;
+        cursor: pointer;
+      ">&times;</button>
+      <div id="modalDetails"></div>
+      <button onclick="downloadReport()" style="
+        margin-top: 1rem;
+        background: #333;
+        color: white;
+        border: none;
+        padding: 0.6rem 1.2rem;
+        border-radius: 8px;
+        cursor: pointer;
+      ">Download PDF</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
+    import {
+      getFirestore, collection, addDoc, serverTimestamp, query, where, onSnapshot, getDoc, doc
+    } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+    import {
+      getAuth, onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAaeCLZ98isu0tMlPCGcFH2kDUzPinMSVw",
+      authDomain: "rapid-repo.firebaseapp.com",
+      projectId: "rapid-repo",
+      storageBucket: "rapid-repo.appspot.com",
+      messagingSenderId: "731599470074",
+      appId: "1:731599470074:web:8f2d575214398df7473843"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth();
+    const form = document.getElementById("reportForm");
+    const reportList = document.getElementById("myReports");
+
+    let currentUser = null;
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        window.location.href = "/login.html";
+        return;
+      }
+
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      const role = userDoc.exists() ? userDoc.data().role : null;
+
+      if (role !== "agent") {
+        window.location.href = "/login.html";
+        return;
+      }
+
+      currentUser = user;
+      listenToMyReports();
+    });
+
+    async function listenToMyReports() {
+      const q = query(collection(db, "reports"), where("agentId", "==", currentUser.uid));
+      onSnapshot(q, (snapshot) => {
+        reportList.innerHTML = "";
+        if (snapshot.empty) {
+          reportList.innerHTML = "<p>No reports yet.</p>";
+          return;
+        }
+
+        snapshot.forEach(doc => {
+          const r = doc.data();
+          const created = r.createdAt?.toDate?.().toISOString().split("T")[0] || "UnknownDate";
+          const filename = `Report_${created}_${doc.id.substring(0, 6)}`;
+          const item = document.createElement("div");
+          item.className = "report";
+          item.innerHTML = `<strong>📄 ${filename}</strong>`;
+          item.onclick = () => showModal(r);
+          reportList.appendChild(item);
+        });
+      });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = {
+        plate: form.plate.value.trim(),
+        state: form.state.value.trim(),
+        make: form.make.value.trim(),
+        model: form.model.value.trim(),
+        color: form.color.value.trim(),
+        status: "Pending",
+        createdAt: serverTimestamp(),
+        agentId: currentUser.uid
+      };
+
+      try {
+        await addDoc(collection(db, "reports"), data);
+        form.reset();
+        alert("Report submitted!");
+      } catch (error) {
+        alert("Error submitting report");
+        console.error(error);
+      }
+    });
+
+    window.showModal = (report) => {
+      const modal = document.getElementById("modal");
+      const modalDetails = document.getElementById("modalDetails");
+
+      modalDetails.innerHTML = `
+        <h3>${report.plate} (${report.state})</h3>
+        <p><strong>Make:</strong> ${report.make}</p>
+        <p><strong>Model:</strong> ${report.model}</p>
+        <p><strong>Color:</strong> ${report.color}</p>
+        <p><strong>Status:</strong> ${report.status}</p>
+        ${report.notes ? `<p><strong>Notes:</strong> ${report.notes}</p>` : ""}
+      `;
+
+      modal.dataset.report = JSON.stringify(report);
+      modal.style.display = "flex";
+    };
+
+    window.closeModal = () => {
+      document.getElementById("modal").style.display = "none";
+    };
+
+    window.handleBackdropClick = (event) => {
+      if (event.target.id === "modal") {
+        closeModal();
+      }
+    };
+
+    window.downloadReport = () => {
+      const report = JSON.parse(document.getElementById("modal").dataset.report);
+      const pdfContent = `
+        License Plate: ${report.plate} (${report.state})
+        Make: ${report.make}
+        Model: ${report.model}
+        Color: ${report.color}
+        Status: ${report.status}
+        Notes: ${report.notes || "None"}
+      `;
+
+      const blob = new Blob([pdfContent], { type: "application/pdf" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `report-${report.plate}-${report.state}.pdf`;
+      link.click();
+    };
+  </script>
+</body>
+</html>
